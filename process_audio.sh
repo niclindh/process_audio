@@ -15,6 +15,15 @@ OUTPUT_FILE="$2"
 TARGET_LUFS="${3:--19}"  # Default to -19 LUFS if not specified
 COVER_IMAGE="amerikapodden2-2000.jpg"
 
+# Ask for the episode title before any audio analysis
+read -r -p "Episode title: " EPISODE_TITLE
+EPISODE_YEAR="$(date +%Y)"
+
+if [ -z "$EPISODE_TITLE" ]; then
+    echo "Error: Episode title is required."
+    exit 1
+fi
+
 # Check if input file exists
 if [ ! -f "$INPUT_FILE" ]; then
     echo "Error: Input file '$INPUT_FILE' not found!"
@@ -100,15 +109,6 @@ fi
 # Pass 3: Encode MP3 with metadata and cover art
 if [ ! -f "$COVER_IMAGE" ]; then
     echo "Error: Cover image '$COVER_IMAGE' not found!"
-    rm -f "$TEMP_OUTPUT" "$TEMP_JSON" "$TEMP_NORMALIZED"
-    exit 1
-fi
-
-read -r -p "Episode title: " EPISODE_TITLE
-EPISODE_YEAR="$(date +%Y)"
-
-if [ -z "$EPISODE_TITLE" ]; then
-    echo "Error: Episode title is required."
     rm -f "$TEMP_OUTPUT" "$TEMP_JSON" "$TEMP_NORMALIZED"
     exit 1
 fi
