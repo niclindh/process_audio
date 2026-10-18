@@ -83,7 +83,7 @@ fi
 # Step 2: Pass 1 - analysis of the silence-stripped audio
 echo "Step 2: Analyzing loudness of the stripped audio..."
 ffmpeg -hide_banner -loglevel info -i "$TEMP_STRIPPED" \
-    -af "acompressor=threshold=-21dB:ratio=3:attack=200:release=1000,loudnorm=I=${TARGET_LUFS}:TP=-1.5:LRA=11:print_format=json" \
+    -af "acompressor=threshold=-21dB:ratio=3:attack=10:release=100,loudnorm=I=${TARGET_LUFS}:TP=-1.5:LRA=11:print_format=json" \
     -f null - 2> "$TEMP_OUTPUT"
 
 # Extract the loudnorm JSON block
@@ -123,7 +123,7 @@ fi
 # Step 3: Pass 2 - apply compression + normalization, write WAV PCM
 echo "Step 3: Applying compression and loudness normalization..."
 ffmpeg -hide_banner -loglevel error -y -i "$TEMP_STRIPPED" \
-    -af "acompressor=threshold=-21dB:ratio=3:attack=200:release=1000,loudnorm=I=${TARGET_LUFS}:TP=-1.5:LRA=11:measured_I=${INPUT_I}:measured_LRA=${INPUT_LRA}:measured_TP=${INPUT_TP}:measured_thresh=${INPUT_THRESH}:offset=${TARGET_OFFSET}" \
+    -af "acompressor=threshold=-21dB:ratio=3:attack=10:release=100,loudnorm=I=${TARGET_LUFS}:TP=-1.5:LRA=11:measured_I=${INPUT_I}:measured_LRA=${INPUT_LRA}:measured_TP=${INPUT_TP}:measured_thresh=${INPUT_THRESH}:offset=${TARGET_OFFSET}" \
     -c:a pcm_s16le "$OUTPUT_FILE"
 
 if [ $? -ne 0 ]; then

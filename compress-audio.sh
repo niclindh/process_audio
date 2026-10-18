@@ -44,7 +44,7 @@ TEMP_OUTPUT=$(mktemp)
 TEMP_JSON=$(mktemp)
 
 # Compression (acompressor) is disabled. Original setting:
-# acompressor=threshold=-21dB:ratio=3:attack=200:release=1000,
+# acompressor=threshold=-21dB:ratio=3:attack=10:release=100,
 # Run FFmpeg and capture all stderr output (keep info loglevel for loudnorm JSON)
 ffmpeg -hide_banner -loglevel info -i "$INPUT_FILE" -af loudnorm=I=$TARGET_LUFS:TP=-1.5:LRA=11:print_format=json -f null - 2> "$TEMP_OUTPUT"
 
@@ -98,7 +98,7 @@ fi
 echo "Pass 2: Applying loudness normalization..."
 TEMP_NORMALIZED="$(mktemp "${TMPDIR:-/tmp}/normalized.XXXXXX.wav")"
 # Compression (acompressor) is disabled. Original setting:
-# acompressor=threshold=-21dB:ratio=3:attack=200:release=1000,
+# acompressor=threshold=-21dB:ratio=3:attack=10:release=100,
 ffmpeg -hide_banner -loglevel error -y -i "$INPUT_FILE" \
     -af loudnorm=I=$TARGET_LUFS:TP=-1.5:LRA=11:measured_I=$INPUT_I:measured_LRA=$INPUT_LRA:measured_TP=$INPUT_TP:measured_thresh=$INPUT_THRESH:offset=$TARGET_OFFSET \
     "$TEMP_NORMALIZED"
