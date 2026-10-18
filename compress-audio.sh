@@ -2,6 +2,10 @@
 
 # Audio Loudness Normalization Script
 # Usage: ./process_audio.sh input.wav output.mp3 [target_lufs]
+#
+# NOTE: Compression (acompressor) is disabled. Loudness normalization
+# (loudnorm) is still active. The disabled acompressor settings stay below
+# as comments, so they can be restored later.
 
 # Check arguments
 if [ $# -lt 2 ]; then
@@ -39,8 +43,10 @@ echo "Pass 1: Analyzing audio properties..."
 TEMP_OUTPUT=$(mktemp)
 TEMP_JSON=$(mktemp)
 
+# Compression (acompressor) is disabled. Original setting:
+# acompressor=threshold=-21dB:ratio=3:attack=200:release=1000,
 # Run FFmpeg and capture all stderr output (keep info loglevel for loudnorm JSON)
-ffmpeg -hide_banner -loglevel info -i "$INPUT_FILE" -af acompressor=threshold=-21dB:ratio=3:attack=200:release=1000,loudnorm=I=$TARGET_LUFS:TP=-1.5:LRA=11:print_format=json -f null - 2> "$TEMP_OUTPUT"
+ffmpeg -hide_banner -loglevel info -i "$INPUT_FILE" -af loudnorm=I=$TARGET_LUFS:TP=-1.5:LRA=11:print_format=json -f null - 2> "$TEMP_OUTPUT"
 
 # Extract JSON from the output (more flexible approach)
 # Look for lines starting with { and ending with }
@@ -91,8 +97,10 @@ fi
 # Pass 2: Normalization
 echo "Pass 2: Applying loudness normalization..."
 TEMP_NORMALIZED="$(mktemp "${TMPDIR:-/tmp}/normalized.XXXXXX.wav")"
+# Compression (acompressor) is disabled. Original setting:
+# acompressor=threshold=-21dB:ratio=3:attack=200:release=1000,
 ffmpeg -hide_banner -loglevel error -y -i "$INPUT_FILE" \
-    -af acompressor=threshold=-21dB:ratio=3:attack=200:release=1000,loudnorm=I=$TARGET_LUFS:TP=-1.5:LRA=11:measured_I=$INPUT_I:measured_LRA=$INPUT_LRA:measured_TP=$INPUT_TP:measured_thresh=$INPUT_THRESH:offset=$TARGET_OFFSET \
+    -af loudnorm=I=$TARGET_LUFS:TP=-1.5:LRA=11:measured_I=$INPUT_I:measured_LRA=$INPUT_LRA:measured_TP=$INPUT_TP:measured_thresh=$INPUT_THRESH:offset=$TARGET_OFFSET \
     "$TEMP_NORMALIZED"
 
 # Check if normalization was successful

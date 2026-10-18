@@ -22,3 +22,26 @@ The script will:
 ```
 ./process_audio.sh input.wav output.mp3 -19
 ```
+
+# Pre-Edit
+
+Strip long silences and compress a WAV file before editing.
+
+## Requirements
+- `ffmpeg` available in your PATH
+
+## Usage
+```
+./pre-edit.sh input.wav
+```
+
+The script will:
+- Strip silences longer than 1.5 seconds. The threshold is `-50dB`. Each long silence is shortened to 1.5 seconds.
+- Apply the compression and loudness normalization settings from `compress-audio.sh` (target `-19 LUFS`)
+- Write the result next to the source file as `<name>-stripped.wav` (WAV PCM)
+- Report how many seconds of audio were removed
+
+## Example
+```
+./pre-edit.sh episode.wav
+```
