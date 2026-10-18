@@ -19,7 +19,7 @@ fi
 
 INPUT_FILE="$1"
 TARGET_LUFS="-19"
-SILENCE_THRESHOLD="-50dB"
+SILENCE_THRESHOLD="-30dB"
 SILENCE_DURATION="1.5"
 
 # Check if input file exists
@@ -29,7 +29,8 @@ if [ ! -f "$INPUT_FILE" ]; then
 fi
 
 # Only .wav input is supported
-case "${INPUT_FILE,,}" in
+INPUT_FILE_LOWER="$(printf '%s' "$INPUT_FILE" | tr '[:upper:]' '[:lower:]')"
+case "$INPUT_FILE_LOWER" in
     *.wav) ;;
     *)
         echo "Error: Input file must be a .wav file."
@@ -137,7 +138,7 @@ if ! [[ "$OUTPUT_DURATION" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     exit 1
 fi
 
-STRIPPED_SECONDS="$(awk -v a="$ORIG_DURATION" -v b="$OUTPUT_DURATION" 'BEGIN { printf "%.2f", a - b }')"
+STRIPPED_SECONDS="$(awk -v a="$ORIG_DURATION" -v b="$OUTPUT_DURATION" 'BEGIN { v = a - b; if (v < 0) v = 0; printf "%.2f", v }')"
 
 echo ""
 echo "✓ Done!"
