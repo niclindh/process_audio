@@ -3,7 +3,7 @@
 # Pre-Edit Audio Script
 # Usage: ./pre-edit.sh input.wav
 #
-# Step 1: Strip silences longer than 1.5 seconds.
+# Step 1: Strip silences longer than 1.2 seconds.
 # Step 2: Apply the compression + loudness normalization chain from
 #         compress-audio.sh (acompressor + two-pass loudnorm).
 #
@@ -20,7 +20,7 @@ fi
 INPUT_FILE="$1"
 TARGET_LUFS="-19"
 SILENCE_THRESHOLD="-30dB"
-SILENCE_DURATION="1.5"
+SILENCE_DURATION="1.2"
 
 # Check if input file exists
 if [ ! -f "$INPUT_FILE" ]; then
@@ -75,10 +75,10 @@ echo "Original duration: ${ORIG_DURATION}s"
 echo "Sample rate:       ${SAMPLE_RATE} Hz"
 echo ""
 
-# Step 1: Strip silences longer than 1.5 seconds
+# Step 1: Strip silences longer than 1.2 seconds
 # stop_* trims silences in the middle and at the end; start_* trims leading
 # silence. Up to SILENCE_DURATION seconds of each silence is kept, so silences
-# longer than 1.5 seconds are shortened to 1.5 seconds.
+# longer than 1.2 seconds are shortened to 1.2 seconds.
 echo "Step 1: Stripping silences longer than ${SILENCE_DURATION}s (threshold ${SILENCE_THRESHOLD})..."
 ffmpeg -hide_banner -loglevel error -y -i "$INPUT_FILE" \
     -af "silenceremove=start_periods=1:start_duration=0:start_threshold=${SILENCE_THRESHOLD}:start_silence=${SILENCE_DURATION}:stop_periods=-1:stop_duration=${SILENCE_DURATION}:stop_threshold=${SILENCE_THRESHOLD}" \
