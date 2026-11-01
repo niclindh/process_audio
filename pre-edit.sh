@@ -61,9 +61,18 @@ if ! [[ "$ORIG_DURATION" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     exit 1
 fi
 
+# Original sample rate. The loudnorm filter upsamples to 192 kHz when it uses
+# dynamic mode, so the output sample rate must be forced back to the input rate.
+SAMPLE_RATE="$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate -of default=nw=1:nk=1 "$INPUT_FILE")"
+if ! [[ "$SAMPLE_RATE" =~ ^[0-9]+$ ]]; then
+    echo "Error: Could not determine the sample rate of '$INPUT_FILE'."
+    exit 1
+fi
+
 echo "Input file:        $INPUT_FILE"
 echo "Output file:       $OUTPUT_FILE"
 echo "Original duration: ${ORIG_DURATION}s"
+echo "Sample rate:       ${SAMPLE_RATE} Hz"
 echo ""
 
 # Step 1: Strip silences longer than 1.5 seconds
@@ -73,6 +82,7 @@ echo ""
 echo "Step 1: Stripping silences longer than ${SILENCE_DURATION}s (threshold ${SILENCE_THRESHOLD})..."
 ffmpeg -hide_banner -loglevel error -y -i "$INPUT_FILE" \
     -af "silenceremove=start_periods=1:start_duration=0:start_threshold=${SILENCE_THRESHOLD}:start_silence=${SILENCE_DURATION}:stop_periods=-1:stop_duration=${SILENCE_DURATION}:stop_threshold=${SILENCE_THRESHOLD}" \
+    -ar "$SAMPLE_RATE" \
     -c:a pcm_s16le "$TEMP_STRIPPED"
 
 if [ $? -ne 0 ]; then
@@ -124,6 +134,7 @@ fi
 echo "Step 3: Applying compression and loudness normalization..."
 ffmpeg -hide_banner -loglevel error -y -i "$TEMP_STRIPPED" \
     -af "acompressor=threshold=-21dB:ratio=3:attack=10:release=100,loudnorm=I=${TARGET_LUFS}:TP=-1.5:LRA=11:measured_I=${INPUT_I}:measured_LRA=${INPUT_LRA}:measured_TP=${INPUT_TP}:measured_thresh=${INPUT_THRESH}:offset=${TARGET_OFFSET}" \
+    -ar "$SAMPLE_RATE" \
     -c:a pcm_s16le "$OUTPUT_FILE"
 
 if [ $? -ne 0 ]; then
