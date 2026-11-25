@@ -7,9 +7,9 @@
 # Step 2: Shorten them to 1.2 seconds, with a 10 ms crossfade at each cut, and
 #         compress with acompressor (the settings that compress-audio.sh
 #         keeps as comments).
-# Step 3: Measure loudness with ebur128.
+# Step 3: Measure loudness with the loudnorm analysis pass.
 # Step 4: Normalize to -19 LUFS. When loudnorm would use linear mode, apply the
-#         same gain with volume. Otherwise run the two-pass loudnorm.
+#         same gain with volume. Otherwise run the second loudnorm pass.
 #
 # Output: <source directory>/<name>-stripped.wav (WAV, PCM)
 # The script also reports how many seconds of audio were removed.
@@ -168,29 +168,40 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Step 3: Measure loudness with ebur128
-# ebur128 measures the same values as the loudnorm analysis pass, but it does
-# not run the 192 kHz dynamic normalizer, so it is much faster.
+# Step 3: Measure loudness with the loudnorm analysis pass
+# The measurement includes target_offset, which the second loudnorm pass needs
+# in dynamic mode.
 echo "Step 3: Measuring loudness..."
 ffmpeg -hide_banner -nostats -loglevel info -i "$TEMP_STRIPPED" \
-    -af "ebur128=peak=true:framelog=quiet" \
+    -af "loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TP}:LRA=${TARGET_LRA}:print_format=json" \
     -f null - 2> "$TEMP_OUTPUT"
 
-MEASURED="$(awk '
-/Summary:/ { summary = 1 }
-!summary { next }
-$1 == "I:" { i = $2 }
-$1 == "Threshold:" && thresh == "" { thresh = $2 }
-$1 == "LRA:" { lra = $2 }
-$1 == "Peak:" { tp = $2 }
-END { print i, lra, tp, thresh }' "$TEMP_OUTPUT")"
-read -r INPUT_I INPUT_LRA INPUT_TP INPUT_THRESH <<< "$MEASURED"
+awk '/^{/,/^}/' "$TEMP_OUTPUT" > "$TEMP_JSON"
+if [ ! -s "$TEMP_JSON" ]; then
+    echo "Error: Could not extract JSON from FFmpeg output"
+    echo "FFmpeg output:"
+    cat "$TEMP_OUTPUT"
+    exit 1
+fi
+
+json_value() {
+    grep "\"$1\"" "$TEMP_JSON" | sed "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/"
+}
+INPUT_I="$(json_value input_i)"
+INPUT_LRA="$(json_value input_lra)"
+INPUT_TP="$(json_value input_tp)"
+INPUT_THRESH="$(json_value input_thresh)"
+TARGET_OFFSET="$(json_value target_offset)"
 
 NUMBER_RE='^-?[0-9]+([.][0-9]+)?$'
-if ! [[ "$INPUT_I" =~ $NUMBER_RE && "$INPUT_LRA" =~ $NUMBER_RE && "$INPUT_TP" =~ $NUMBER_RE && "$INPUT_THRESH" =~ $NUMBER_RE ]]; then
-    echo "Error: Could not read the loudness measurement."
-    echo "Measured values: I='$INPUT_I' LRA='$INPUT_LRA' TP='$INPUT_TP' thresh='$INPUT_THRESH'"
-    cat "$TEMP_OUTPUT"
+if ! [[ "$INPUT_I" =~ $NUMBER_RE && "$INPUT_LRA" =~ $NUMBER_RE && "$INPUT_TP" =~ $NUMBER_RE && "$INPUT_THRESH" =~ $NUMBER_RE && "$TARGET_OFFSET" =~ $NUMBER_RE ]]; then
+    echo "Error: Failed to extract all required values from JSON"
+    echo "Extracted values:"
+    echo "  INPUT_I: '$INPUT_I'"
+    echo "  INPUT_LRA: '$INPUT_LRA'"
+    echo "  INPUT_TP: '$INPUT_TP'"
+    echo "  INPUT_THRESH: '$INPUT_THRESH'"
+    echo "  TARGET_OFFSET: '$TARGET_OFFSET'"
     exit 1
 fi
 
@@ -212,41 +223,7 @@ if [ "$LINEAR" = "1" ]; then
         -af "volume=${GAIN}dB" \
         -c:a pcm_s16le "$OUTPUT_FILE"
 else
-    # Dynamic mode needs target_offset from the loudnorm analysis pass, so run
-    # the original two-pass loudnorm.
-    echo "Step 4: Applying dynamic loudness normalization (two-pass loudnorm)..."
-    ffmpeg -hide_banner -nostats -loglevel info -i "$TEMP_STRIPPED" \
-        -af "loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TP}:LRA=${TARGET_LRA}:print_format=json" \
-        -f null - 2> "$TEMP_OUTPUT"
-
-    awk '/^{/,/^}/' "$TEMP_OUTPUT" > "$TEMP_JSON"
-    if [ ! -s "$TEMP_JSON" ]; then
-        echo "Error: Could not extract JSON from FFmpeg output"
-        echo "FFmpeg output:"
-        cat "$TEMP_OUTPUT"
-        exit 1
-    fi
-
-    json_value() {
-        grep "\"$1\"" "$TEMP_JSON" | sed "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/"
-    }
-    INPUT_I="$(json_value input_i)"
-    INPUT_LRA="$(json_value input_lra)"
-    INPUT_TP="$(json_value input_tp)"
-    INPUT_THRESH="$(json_value input_thresh)"
-    TARGET_OFFSET="$(json_value target_offset)"
-
-    if [ -z "$INPUT_I" ] || [ -z "$INPUT_LRA" ] || [ -z "$INPUT_TP" ] || [ -z "$INPUT_THRESH" ] || [ -z "$TARGET_OFFSET" ]; then
-        echo "Error: Failed to extract all required values from JSON"
-        echo "Extracted values:"
-        echo "  INPUT_I: '$INPUT_I'"
-        echo "  INPUT_LRA: '$INPUT_LRA'"
-        echo "  INPUT_TP: '$INPUT_TP'"
-        echo "  INPUT_THRESH: '$INPUT_THRESH'"
-        echo "  TARGET_OFFSET: '$TARGET_OFFSET'"
-        exit 1
-    fi
-
+    echo "Step 4: Applying dynamic loudness normalization (loudnorm)..."
     ffmpeg -hide_banner -loglevel error -y -i "$TEMP_STRIPPED" \
         -af "loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TP}:LRA=${TARGET_LRA}:measured_I=${INPUT_I}:measured_LRA=${INPUT_LRA}:measured_TP=${INPUT_TP}:measured_thresh=${INPUT_THRESH}:offset=${TARGET_OFFSET}" \
         -ar "$SAMPLE_RATE" \

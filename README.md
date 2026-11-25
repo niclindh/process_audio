@@ -17,10 +17,10 @@ Compression (`acompressor`) is disabled in this script. The settings stay in the
 
 The script will:
 - Prompt for the episode title at the start of the run
-- Measure loudness with `ebur128` (integrated loudness, loudness range, true peak)
+- Measure loudness with the `loudnorm` analysis pass (integrated loudness, loudness range, true peak)
 - Normalize to the target loudness, with a true peak limit of `-1.5 dBTP` and a loudness range target of `11 LU`:
-  - If one gain change is enough (loudnorm linear mode), apply that gain with `volume`. This is the fast path.
-  - Otherwise run the two-pass `loudnorm` in dynamic mode. This is much slower.
+  - If one gain change is enough (loudnorm linear mode), apply that gain with `volume`. This skips the slow second `loudnorm` pass.
+  - Otherwise run the second `loudnorm` pass in dynamic mode.
 - Encode to MP3 at 128 kbps with ID3v2.3 tags:
   - title: the episode title
   - artist: `Amerikapodden`
@@ -48,7 +48,7 @@ The script will:
 - Find silences longer than 1.2 seconds with `silencedetect`. The threshold is `-30dB`.
 - Shorten each long silence to 1.2 seconds, including leading and trailing silence. Each cut in the middle of the file gets a 10 ms crossfade.
 - Compress with `acompressor=threshold=-21dB:ratio=3:attack=10:release=100`
-- Normalize to `-19 LUFS` in the same way as `compress-audio.sh`
+- Measure and normalize to `-19 LUFS` in the same way as `compress-audio.sh`
 - Write the result next to the source file as `<name>-stripped.wav` (16-bit WAV PCM, input sample rate)
 - Report how many seconds of audio were removed
 
