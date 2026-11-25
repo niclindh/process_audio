@@ -6,6 +6,9 @@
 # NOTE: Compression (acompressor) is disabled. Loudness normalization
 # (loudnorm) is still active. The disabled acompressor settings stay below
 # as comments, so they can be restored later.
+#
+# Loudness is measured with ebur128. When loudnorm would use linear mode, the
+# same gain is applied with volume. Otherwise the two-pass loudnorm runs.
 
 # Check arguments
 if [ $# -lt 2 ]; then
@@ -18,6 +21,8 @@ INPUT_FILE="$1"
 OUTPUT_FILE="$2"
 TARGET_LUFS="${3:--19}"  # Default to -19 LUFS if not specified
 COVER_IMAGE="amerikapodden2-2000.jpg"
+TARGET_TP="-1.5"
+TARGET_LRA="11"
 
 # Ask for the episode title before any audio analysis
 read -r -p "Episode title: " EPISODE_TITLE
@@ -38,70 +43,113 @@ echo "Analyzing audio file: $INPUT_FILE"
 echo "Target loudness: $TARGET_LUFS LUFS"
 echo ""
 
-# Pass 1: Analysis - Capture all FFmpeg output
+# Pass 1: Analysis with ebur128
+# ebur128 measures the same values as the loudnorm analysis pass, but it does
+# not run the 192 kHz dynamic normalizer, so it is much faster.
 echo "Pass 1: Analyzing audio properties..."
 TEMP_OUTPUT=$(mktemp)
 TEMP_JSON=$(mktemp)
+TEMP_NORMALIZED="$(mktemp "${TMPDIR:-/tmp}/normalized.XXXXXX.wav")"
 
 # Compression (acompressor) is disabled. Original setting:
 # acompressor=threshold=-21dB:ratio=3:attack=10:release=100,
-# Run FFmpeg and capture all stderr output (keep info loglevel for loudnorm JSON)
-ffmpeg -hide_banner -loglevel info -i "$INPUT_FILE" -af loudnorm=I=$TARGET_LUFS:TP=-1.5:LRA=11:print_format=json -f null - 2> "$TEMP_OUTPUT"
+ffmpeg -hide_banner -nostats -loglevel info -i "$INPUT_FILE" \
+    -af "ebur128=peak=true:framelog=quiet" \
+    -f null - 2> "$TEMP_OUTPUT"
 
-# Extract JSON from the output (more flexible approach)
-# Look for lines starting with { and ending with }
-awk '/^{/,/^}/' "$TEMP_OUTPUT" > "$TEMP_JSON"
+MEASURED="$(awk '
+/Summary:/ { summary = 1 }
+!summary { next }
+$1 == "I:" { i = $2 }
+$1 == "Threshold:" && thresh == "" { thresh = $2 }
+$1 == "LRA:" { lra = $2 }
+$1 == "Peak:" { tp = $2 }
+END { print i, lra, tp, thresh }' "$TEMP_OUTPUT")"
+read -r INPUT_I INPUT_LRA INPUT_TP INPUT_THRESH <<< "$MEASURED"
 
-# If that didn't work, try alternative extraction
-if [ ! -s "$TEMP_JSON" ]; then
-    echo "Trying alternative JSON extraction..."
-    # Look for the JSON block in a different way
-    sed -n '/^{$/,/^}$/p' "$TEMP_OUTPUT" > "$TEMP_JSON"
-fi
-
-# If still no JSON, try extracting from loudnorm filter output
-if [ ! -s "$TEMP_JSON" ]; then
-    echo "Trying loudnorm-specific extraction..."
-    grep -A 20 "loudnorm" "$TEMP_OUTPUT" | sed -n '/^{$/,/^}$/p' > "$TEMP_JSON"
-fi
-
-# Check if we got valid JSON
-if [ ! -s "$TEMP_JSON" ]; then
-    echo "Error: Could not extract JSON from FFmpeg output"
-    echo "FFmpeg output:"
+NUMBER_RE='^-?[0-9]+([.][0-9]+)?$'
+if ! [[ "$INPUT_I" =~ $NUMBER_RE && "$INPUT_LRA" =~ $NUMBER_RE && "$INPUT_TP" =~ $NUMBER_RE && "$INPUT_THRESH" =~ $NUMBER_RE ]]; then
+    echo "Error: Could not read the loudness measurement."
+    echo "Measured values: I='$INPUT_I' LRA='$INPUT_LRA' TP='$INPUT_TP' thresh='$INPUT_THRESH'"
     cat "$TEMP_OUTPUT"
-    rm -f "$TEMP_OUTPUT" "$TEMP_JSON"
+    rm -f "$TEMP_OUTPUT" "$TEMP_JSON" "$TEMP_NORMALIZED"
     exit 1
 fi
 
-# Extract values from JSON - more robust parsing
-INPUT_I=$(grep '"input_i"' "$TEMP_JSON" | sed 's/.*"input_i"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-INPUT_LRA=$(grep '"input_lra"' "$TEMP_JSON" | sed 's/.*"input_lra"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-INPUT_TP=$(grep '"input_tp"' "$TEMP_JSON" | sed 's/.*"input_tp"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-INPUT_THRESH=$(grep '"input_thresh"' "$TEMP_JSON" | sed 's/.*"input_thresh"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-TARGET_OFFSET=$(grep '"target_offset"' "$TEMP_JSON" | sed 's/.*"target_offset"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+# loudnorm uses linear mode (one gain for the whole file) when the gain does not
+# push the true peak above TARGET_TP and the loudness range is within
+# TARGET_LRA. Otherwise it uses dynamic mode.
+GAIN="$(awk -v i="$INPUT_I" -v t="$TARGET_LUFS" 'BEGIN { printf "%.2f", t - i }')"
+LINEAR="$(awk -v g="$GAIN" -v tp="$INPUT_TP" -v lra="$INPUT_LRA" -v ttp="$TARGET_TP" -v tlra="$TARGET_LRA" \
+    'BEGIN { print (tp + g <= ttp && lra <= tlra) ? 1 : 0 }')"
 
-# Validate extracted values
-if [ -z "$INPUT_I" ] || [ -z "$INPUT_LRA" ] || [ -z "$INPUT_TP" ] || [ -z "$INPUT_THRESH" ] || [ -z "$TARGET_OFFSET" ]; then
-    echo "Error: Failed to extract all required values from JSON"
-    echo "Extracted values:"
-    echo "  INPUT_I: '$INPUT_I'"
-    echo "  INPUT_LRA: '$INPUT_LRA'"
-    echo "  INPUT_TP: '$INPUT_TP'"
-    echo "  INPUT_THRESH: '$INPUT_THRESH'"
-    echo "  TARGET_OFFSET: '$TARGET_OFFSET'"
-    rm -f "$TEMP_OUTPUT" "$TEMP_JSON"
-    exit 1
-fi
+echo "Measured: I=${INPUT_I} LUFS, LRA=${INPUT_LRA} LU, TP=${INPUT_TP} dBTP"
 
 # Pass 2: Normalization
-echo "Pass 2: Applying loudness normalization..."
-TEMP_NORMALIZED="$(mktemp "${TMPDIR:-/tmp}/normalized.XXXXXX.wav")"
-# Compression (acompressor) is disabled. Original setting:
-# acompressor=threshold=-21dB:ratio=3:attack=10:release=100,
-ffmpeg -hide_banner -loglevel error -y -i "$INPUT_FILE" \
-    -af loudnorm=I=$TARGET_LUFS:TP=-1.5:LRA=11:measured_I=$INPUT_I:measured_LRA=$INPUT_LRA:measured_TP=$INPUT_TP:measured_thresh=$INPUT_THRESH:offset=$TARGET_OFFSET \
-    "$TEMP_NORMALIZED"
+if [ "$LINEAR" = "1" ]; then
+    # Linear mode is one gain change. volume applies it at the input sample
+    # rate, without loudnorm's resampling to 192 kHz.
+    echo "Pass 2: Applying linear loudness normalization (${GAIN} dB)..."
+    ffmpeg -hide_banner -loglevel error -y -i "$INPUT_FILE" \
+        -af "volume=${GAIN}dB" \
+        "$TEMP_NORMALIZED"
+else
+    # Dynamic mode needs target_offset from the loudnorm analysis pass, so run
+    # the original two-pass loudnorm.
+    echo "Pass 2: Applying dynamic loudness normalization (two-pass loudnorm)..."
+    # Run FFmpeg and capture all stderr output (keep info loglevel for loudnorm JSON)
+    ffmpeg -hide_banner -nostats -loglevel info -i "$INPUT_FILE" -af loudnorm=I=$TARGET_LUFS:TP=$TARGET_TP:LRA=$TARGET_LRA:print_format=json -f null - 2> "$TEMP_OUTPUT"
+
+    # Extract JSON from the output (more flexible approach)
+    # Look for lines starting with { and ending with }
+    awk '/^{/,/^}/' "$TEMP_OUTPUT" > "$TEMP_JSON"
+
+    # If that didn't work, try alternative extraction
+    if [ ! -s "$TEMP_JSON" ]; then
+        echo "Trying alternative JSON extraction..."
+        # Look for the JSON block in a different way
+        sed -n '/^{$/,/^}$/p' "$TEMP_OUTPUT" > "$TEMP_JSON"
+    fi
+
+    # If still no JSON, try extracting from loudnorm filter output
+    if [ ! -s "$TEMP_JSON" ]; then
+        echo "Trying loudnorm-specific extraction..."
+        grep -A 20 "loudnorm" "$TEMP_OUTPUT" | sed -n '/^{$/,/^}$/p' > "$TEMP_JSON"
+    fi
+
+    # Check if we got valid JSON
+    if [ ! -s "$TEMP_JSON" ]; then
+        echo "Error: Could not extract JSON from FFmpeg output"
+        echo "FFmpeg output:"
+        cat "$TEMP_OUTPUT"
+        rm -f "$TEMP_OUTPUT" "$TEMP_JSON" "$TEMP_NORMALIZED"
+        exit 1
+    fi
+
+    # Extract values from JSON - more robust parsing
+    INPUT_I=$(grep '"input_i"' "$TEMP_JSON" | sed 's/.*"input_i"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+    INPUT_LRA=$(grep '"input_lra"' "$TEMP_JSON" | sed 's/.*"input_lra"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+    INPUT_TP=$(grep '"input_tp"' "$TEMP_JSON" | sed 's/.*"input_tp"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+    INPUT_THRESH=$(grep '"input_thresh"' "$TEMP_JSON" | sed 's/.*"input_thresh"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+    TARGET_OFFSET=$(grep '"target_offset"' "$TEMP_JSON" | sed 's/.*"target_offset"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+
+    # Validate extracted values
+    if [ -z "$INPUT_I" ] || [ -z "$INPUT_LRA" ] || [ -z "$INPUT_TP" ] || [ -z "$INPUT_THRESH" ] || [ -z "$TARGET_OFFSET" ]; then
+        echo "Error: Failed to extract all required values from JSON"
+        echo "Extracted values:"
+        echo "  INPUT_I: '$INPUT_I'"
+        echo "  INPUT_LRA: '$INPUT_LRA'"
+        echo "  INPUT_TP: '$INPUT_TP'"
+        echo "  INPUT_THRESH: '$INPUT_THRESH'"
+        echo "  TARGET_OFFSET: '$TARGET_OFFSET'"
+        rm -f "$TEMP_OUTPUT" "$TEMP_JSON" "$TEMP_NORMALIZED"
+        exit 1
+    fi
+
+    ffmpeg -hide_banner -loglevel error -y -i "$INPUT_FILE" \
+        -af loudnorm=I=$TARGET_LUFS:TP=$TARGET_TP:LRA=$TARGET_LRA:measured_I=$INPUT_I:measured_LRA=$INPUT_LRA:measured_TP=$INPUT_TP:measured_thresh=$INPUT_THRESH:offset=$TARGET_OFFSET \
+        "$TEMP_NORMALIZED"
+fi
 
 # Check if normalization was successful
 if [ $? -eq 0 ]; then
