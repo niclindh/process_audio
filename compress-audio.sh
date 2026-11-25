@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Audio Loudness Normalization Script
-# Usage: ./process_audio.sh input.wav output.mp3 [target_lufs]
+# Usage: ./compress-audio.sh input.wav output.mp3 [target_lufs]
 #
 # NOTE: Compression (acompressor) is disabled. Loudness normalization
 # (loudnorm) is still active. The disabled acompressor settings stay below
@@ -13,7 +13,7 @@
 # Check arguments
 if [ $# -lt 2 ]; then
     echo "Usage: $0 <input_file> <output_file> [target_lufs]"
-    echo "Example: ./process_audio.sh input.wav output.mp3 -19"
+    echo "Example: ./compress-audio.sh input.wav output.mp3 -19"
     exit 1
 fi
 

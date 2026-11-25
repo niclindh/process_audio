@@ -5,7 +5,8 @@
 #
 # Step 1: Find silences longer than 1.2 seconds.
 # Step 2: Shorten them to 1.2 seconds, with a 10 ms crossfade at each cut, and
-#         apply the acompressor settings from compress-audio.sh.
+#         compress with acompressor (the settings that compress-audio.sh
+#         keeps as comments).
 # Step 3: Measure loudness with ebur128.
 # Step 4: Normalize to -19 LUFS. When loudnorm would use linear mode, apply the
 #         same gain with volume. Otherwise run the two-pass loudnorm.
