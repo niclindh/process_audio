@@ -49,7 +49,9 @@ echo ""
 echo "Pass 1: Analyzing audio properties..."
 TEMP_OUTPUT=$(mktemp)
 TEMP_JSON=$(mktemp)
-TEMP_NORMALIZED="$(mktemp "${TMPDIR:-/tmp}/normalized.XXXXXX.wav")"
+# macOS mktemp replaces the X's only at the end of the template, so the temp
+# WAV has no .wav suffix and ffmpeg gets "-f wav".
+TEMP_NORMALIZED="$(mktemp "${TMPDIR:-/tmp}/normalized.XXXXXX")"
 
 # Compression (acompressor) is disabled. Original setting:
 # acompressor=threshold=-21dB:ratio=3:attack=10:release=100,
@@ -92,7 +94,7 @@ if [ "$LINEAR" = "1" ]; then
     echo "Pass 2: Applying linear loudness normalization (${GAIN} dB)..."
     ffmpeg -hide_banner -loglevel error -y -i "$INPUT_FILE" \
         -af "volume=${GAIN}dB" \
-        "$TEMP_NORMALIZED"
+        -f wav "$TEMP_NORMALIZED"
 else
     # Dynamic mode needs target_offset from the loudnorm analysis pass, so run
     # the original two-pass loudnorm.
@@ -148,7 +150,7 @@ else
 
     ffmpeg -hide_banner -loglevel error -y -i "$INPUT_FILE" \
         -af loudnorm=I=$TARGET_LUFS:TP=$TARGET_TP:LRA=$TARGET_LRA:measured_I=$INPUT_I:measured_LRA=$INPUT_LRA:measured_TP=$INPUT_TP:measured_thresh=$INPUT_THRESH:offset=$TARGET_OFFSET \
-        "$TEMP_NORMALIZED"
+        -f wav "$TEMP_NORMALIZED"
 fi
 
 # Check if normalization was successful

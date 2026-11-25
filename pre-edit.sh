@@ -52,8 +52,9 @@ INPUT_BASE="$(basename -- "$INPUT_FILE")"
 INPUT_NAME="${INPUT_BASE%.*}"
 OUTPUT_FILE="$INPUT_DIR/${INPUT_NAME}-stripped.wav"
 
-# Temporary files
-TEMP_STRIPPED="$(mktemp "${TMPDIR:-/tmp}/stripped.XXXXXX.wav")"
+# Temporary files. macOS mktemp replaces the X's only at the end of the
+# template, so the temp WAV has no .wav suffix and ffmpeg gets "-f wav".
+TEMP_STRIPPED="$(mktemp "${TMPDIR:-/tmp}/stripped.XXXXXX")"
 TEMP_OUTPUT="$(mktemp)"
 TEMP_JSON="$(mktemp)"
 TEMP_DETECT="$(mktemp)"
@@ -160,7 +161,7 @@ echo "Step 2: Cutting silences (${CUT_COUNT} cuts with ${CROSSFADE_DURATION}s cr
 ffmpeg -hide_banner -loglevel error -y -i "$INPUT_FILE" \
     -/filter_complex "$TEMP_GRAPH" -map "[out]" \
     -ar "$SAMPLE_RATE" \
-    -c:a pcm_s16le "$TEMP_STRIPPED"
+    -c:a pcm_s16le -f wav "$TEMP_STRIPPED"
 
 if [ $? -ne 0 ]; then
     echo "Error: Silence removal or compression failed."
